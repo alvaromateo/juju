@@ -56,7 +56,16 @@ Add a workspace, or 'model':
 juju add-model tutorial-model
 ```
 
+For architectures different than the default amd64 (i.e. macos laptops with the newer M1 chips), 
+set the following constraint to the model:
+
+```
+juju set-model-constraints arch=arm64
+```
+
 ### Deploy, configure, and integrate a few things
+
+#### amd64 architecture
 
 Deploy Mattermost:
 
@@ -95,6 +104,97 @@ watch -n 1 -c juju status --color
 
 Use the `--relations` flag to view more information about your integrations.
 Use the `--storage` flag to view more information about your storages.
+
+#### arm64 architecture
+
+The process to deploy the application when using an arm64 machine is a bit different, given that 
+the mattermost-k8s charm doesn't have a built image for arm64.
+
+First of all you'll need modify and build the 
+[charm-k8s-mattermost](https://launchpad.net/charm-k8s-mattermost) charm. 
+
+```
+git clone https://git.launchpad.net/charm-k8s-mattermost
+cd charm-k8s-mattermost
+```
+
+Now, you'll modify the charmcraft.yaml file so that it contains all the necessary information for 
+the build. Overwrite charmcraft.yaml with the following content:
+
+<details>
+<summary>charmcraft.yaml</summary>
+<br>
+
+```yaml
+name: mattermost-k8s
+title: Mattermost
+summary: Mattermost is a flexible, open source messaging platform that enables secure team collaboration.
+links:
+  documentation: https://discourse.charmhub.io/t/mattermost-documentation-overview/3758
+  contact: launchpad.net/~canonical-is-sre
+description: |
+  Mattermost is a flexible, open source messaging platform that enables secure team collaboration.
+  https://mattermost.com
+
+assumes:
+  - juju >= 2.8.0
+  - k8s-api
+
+requires:
+  db:
+    interface: pgsql
+    limit: 1
+    
+type: "charm"
+base: ubuntu@20.04
+build-base: ubuntu@20.04
+
+platforms:
+  amd64:
+  arm64:
+
+containers:
+  mattermost:
+    resource: mattermost-k8s-image
+
+resources:
+  mattermost-k8s-image:
+    type: oci-image
+    description: OCI image for mattermost-k8s
+```
+
+</details>
+
+Delete the metadata.yaml file, as it's used by older versions of charmcraft and you just added 
+all the information that it contained to charmcraft.yaml.
+
+```
+rm metadata.yml
+```
+
+Next, install docker, build the OCI image from the Dockerfile and push it to the microK8s registry.
+
+```
+# Add Docker's official GPG key:
+sudo apt-get update
+sudo apt-get install ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+# Add the repository to Apt sources:
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+  $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt-get update
+
+# Install latest version
+sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# Build image and push it to registry
+sudo docker build -t localhost:32000/mattermost .
+```
 
 ### Test your deployment
 
